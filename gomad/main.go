@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+
 	"github.com/gin-gonic/gin"
 	"github.com/javierprovecho/kargo"
 )
@@ -25,10 +27,11 @@ func main() {
 }
 
 func server() {
+	hostname, _ := os.Hostname()
 	r := gin.Default()
 
 	r.GET("/ping", func(c *gin.Context) {
-		c.String(200, "pong")
+		c.String(200, "pong @", hostname)
 	})
 
 	r.Run()

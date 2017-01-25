@@ -28,10 +28,13 @@ type UploadConfig struct {
 	path       string
 }
 
-func build(name string) (string, error) {
-	tmpDir, err := ioutil.TempDir("", "")
-	if err != nil {
-		return "", err
+func build(name string, tmpDir string) (string, error) {
+	if tmpDir == "" {
+		var err error
+		tmpDir, err = ioutil.TempDir("", "")
+		if err != nil {
+			return "", err
+		}
 	}
 	output := filepath.Join(tmpDir, name)
 
@@ -62,7 +65,7 @@ func build(name string) (string, error) {
 func Upload(config UploadConfig) (string, error) {
 	if config.path == "" {
 		logrus.Infof("Building %s binary...\n", config.ObjectName)
-		output, err := build(config.ObjectName)
+		output, err := build(config.ObjectName, "")
 		if err != nil {
 			return "", err
 		}
@@ -88,6 +91,7 @@ func Upload(config UploadConfig) (string, error) {
 		}
 	}
 
+	fmt.Println(config.path)
 	f, err := os.Open(config.path)
 	if err != nil {
 		return "", err

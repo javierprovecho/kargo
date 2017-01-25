@@ -2,7 +2,6 @@ package kargo
 
 import (
 	"flag"
-	"fmt"
 	"strings"
 
 	"github.com/Sirupsen/logrus"
@@ -18,7 +17,7 @@ var (
 	EnableSwarm bool
 	api         string
 
-	delete bool
+	deleteDeployment bool
 )
 
 func init() {
@@ -28,7 +27,7 @@ func init() {
 	flag.BoolVar(&EnableSwarm, "swarm", false, "Deploy to Swarm.")
 	flag.StringVar(&api, "api", "tcp://127.0.0.1:2375", "Swarm API")
 
-	flag.BoolVar(&delete, "delete", false, "Delete current deployment (if any)")
+	flag.BoolVar(&deleteDeployment, "delete", false, "Delete current deployment (if any)")
 
 	flag.IntVar(&replicas, "replicas", 1, "Number of replicas")
 
@@ -50,7 +49,7 @@ type DeploymentManager struct {
 }
 
 func (dm *DeploymentManager) Start() {
-	fmt.Println(EnableKubernetes, EnableSwarm)
+
 	if !EnableKubernetes && !EnableSwarm {
 		dm.R()
 		return
@@ -60,20 +59,23 @@ func (dm *DeploymentManager) Start() {
 		logrus.Fatalln("You must enable only one orchestrator.")
 	}
 
-	if EnableKubernetes && delete {
-		err := deleteReplicaSet(dm.DC)
-		if err != nil {
-			logrus.Error(err)
-		}
-		return
-	}
+	if deleteDeployment {
 
-	if EnableSwarm && delete {
-		err := deleteService(dm.DC)
-		if err != nil {
-			logrus.Error(err)
+		if EnableKubernetes {
+			err := deleteReplicaSet(dm.DC)
+			if err != nil {
+				logrus.Error(err)
+			}
+			return
 		}
-		return
+
+		if EnableSwarm {
+			err := deleteService(dm.DC)
+			if err != nil {
+				logrus.Error(err)
+			}
+			return
+		}
 	}
 
 	// Source or binary
