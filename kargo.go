@@ -3,83 +3,109 @@ package kargo
 import (
 	"flag"
 	"fmt"
-	"io"
+	"strings"
+
+	"github.com/Sirupsen/logrus"
+	"github.com/kardianos/osext"
 )
 
 var (
-	apiHost          string
-	cpuLimit         string
-	cpuRequest       string
-	memoryLimit      string
-	memoryRequest    string
-	namespace        string
-	replicas         int
+	replicas int
+
 	EnableKubernetes bool
+	master           string
+
+	EnableSwarm bool
+	api         string
+
+	delete bool
 )
 
 func init() {
-	flag.StringVar(&apiHost, "api-host", "127.0.0.1:8001", "Kubernetes API server")
-	flag.StringVar(&cpuLimit, "cpu-limit", "100m", "Max CPU in milicores")
-	flag.StringVar(&cpuRequest, "cpu-request", "100m", "Min CPU in milicores")
-	flag.StringVar(&memoryLimit, "memory-limit", "64M", "Max memory in MB")
-	flag.StringVar(&memoryRequest, "memory-request", "64M", "Min memory in MB")
-	flag.StringVar(&namespace, "namespace", "default", "The Kubernetes namespace.")
-	flag.IntVar(&replicas, "replicas", 1, "Number of replicas")
 	flag.BoolVar(&EnableKubernetes, "kubernetes", false, "Deploy to Kubernetes.")
+	flag.StringVar(&master, "master", "127.0.0.1:8001", "Kubernetes Master")
+
+	flag.BoolVar(&EnableSwarm, "swarm", false, "Deploy to Swarm.")
+	flag.StringVar(&api, "api", "tcp://127.0.0.1:2375", "Swarm API")
+
+	flag.BoolVar(&delete, "delete", false, "Delete current deployment (if any)")
+
+	flag.IntVar(&replicas, "replicas", 1, "Number of replicas")
+
+	flag.Parse()
 }
 
 type DeploymentConfig struct {
-	Annotations   map[string]string
-	Args          []string
-	Env           map[string]string
-	BinaryURL     string
-	cpuRequest    string
-	cpuLimit      string
-	memoryRequest string
-	memoryLimit   string
-	Name          string
-	Namespace     string
-	Replicas      int
-	Labels        map[string]string
+	Args      []string
+	Env       map[string]string
+	BinaryURL string
+	Name      string
+	Replicas  int
 }
 
 type DeploymentManager struct {
-	apiHost string
-	config  DeploymentConfig
+	DC DeploymentConfig
+	UC UploadConfig
+	R  func()
 }
 
-func New() *DeploymentManager {
-	return &DeploymentManager{apiHost: apiHost}
-}
-
-func (dm *DeploymentManager) Create(config DeploymentConfig) error {
-	config.cpuRequest = cpuRequest
-	config.cpuLimit = cpuLimit
-	config.memoryRequest = memoryRequest
-	config.memoryLimit = memoryLimit
-	config.Replicas = replicas
-	config.Namespace = namespace
-
-	if config.Env == nil {
-		config.Env = make(map[string]string)
+func (dm *DeploymentManager) Start() {
+	fmt.Println(EnableKubernetes, EnableSwarm)
+	if !EnableKubernetes && !EnableSwarm {
+		dm.R()
+		return
 	}
-	if config.Annotations == nil {
-		config.Annotations = make(map[string]string)
+
+	if EnableKubernetes && EnableSwarm {
+		logrus.Fatalln("You must enable only one orchestrator.")
 	}
-	if config.Labels == nil {
-		config.Labels = make(map[string]string)
+
+	if EnableKubernetes && delete {
+		err := deleteReplicaSet(dm.DC)
+		if err != nil {
+			logrus.Error(err)
+		}
+		return
 	}
-	dm.config = config
 
-	fmt.Printf("Creating %s ReplicaSet...\n", config.Name)
-	return createReplicaSet(dm.config)
-}
+	if EnableSwarm && delete {
+		err := deleteService(dm.DC)
+		if err != nil {
+			logrus.Error(err)
+		}
+		return
+	}
 
-func (dm *DeploymentManager) Delete() error {
-	fmt.Printf("Deleting %s ReplicaSet...\n", dm.config.Name)
-	return deleteReplicaSet(dm.config)
-}
+	// Source or binary
+	dm.UC.path, _ = osext.Executable()
+	if strings.Contains(dm.UC.path, "go-build") {
+		dm.UC.path = ""
+	}
 
-func (dm *DeploymentManager) Logs(w io.Writer) error {
-	return getLogs(dm.config, w)
+	// Upload (and build) or cached
+	link, err := Upload(dm.UC)
+	if err != nil {
+		logrus.Fatalf("Error while uploading: %s\n", err)
+	}
+
+	dm.DC.BinaryURL = link
+
+	if dm.DC.Env == nil {
+		dm.DC.Env = make(map[string]string)
+	}
+
+	if EnableKubernetes {
+		err = createReplicaSet(dm.DC)
+		if err != nil {
+			logrus.Error(err)
+		}
+
+	}
+	if EnableSwarm {
+		err = createService(dm.DC)
+		if err != nil {
+			logrus.Error(err)
+		}
+	}
+
 }

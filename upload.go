@@ -9,6 +9,8 @@ import (
 	"os/exec"
 	"path/filepath"
 
+	"github.com/Sirupsen/logrus"
+
 	"golang.org/x/net/context"
 	"golang.org/x/oauth2/google"
 	"google.golang.org/api/googleapi"
@@ -23,7 +25,7 @@ type UploadConfig struct {
 	BucketName string
 	ObjectName string
 	ProjectID  string
-	Path       string
+	path       string
 }
 
 func build(name string) (string, error) {
@@ -33,7 +35,7 @@ func build(name string) (string, error) {
 	}
 	output := filepath.Join(tmpDir, name)
 
-	ldflags := `-extldflags "-static"`
+	ldflags := `-extldflags "-static -s -w"`
 	command := []string{
 		"go", "build", "-o", output, "-a", "--ldflags",
 		ldflags, "-tags", "netgo",
@@ -50,7 +52,7 @@ func build(name string) (string, error) {
 
 	data, err := cmd.CombinedOutput()
 	if err != nil {
-		fmt.Println(string(data))
+		logrus.Infoln(string(data))
 		return "", err
 	}
 
@@ -58,14 +60,14 @@ func build(name string) (string, error) {
 }
 
 func Upload(config UploadConfig) (string, error) {
-	if config.Path == "" {
-		fmt.Printf("Building %s binary...\n", config.ObjectName)
+	if config.path == "" {
+		logrus.Infof("Building %s binary...\n", config.ObjectName)
 		output, err := build(config.ObjectName)
 		if err != nil {
 			return "", err
 		}
-		config.Path = output
-		fmt.Println("Created: " + config.Path)
+		config.path = output
+		logrus.Infoln("Created: " + config.path)
 	}
 
 	client, err := google.DefaultClient(context.Background(), scope)
@@ -86,7 +88,7 @@ func Upload(config UploadConfig) (string, error) {
 		}
 	}
 
-	f, err := os.Open(config.Path)
+	f, err := os.Open(config.path)
 	if err != nil {
 		return "", err
 	}
@@ -110,7 +112,7 @@ func Upload(config UploadConfig) (string, error) {
 
 	if object != nil {
 		if object.HTTPStatusCode == 200 {
-			fmt.Printf("Object %s already exists, skipping upload.\n", filepath.Join(config.BucketName, objectName))
+			logrus.Warningf("Object %s already exists, skipping upload.\n", filepath.Join(config.BucketName, objectName))
 			return publicLink, nil
 		}
 	}
@@ -134,11 +136,11 @@ func Upload(config UploadConfig) (string, error) {
 		Metadata: metadata,
 	}
 
-	fmt.Printf("Uploading %s to the %s bucket...\n", object.Name, config.BucketName)
+	logrus.Infof("Uploading %s to the %s bucket...\n", object.Name, config.BucketName)
 	_, err = service.Objects.Insert(config.BucketName, object).Media(f).Do()
 	if err != nil {
 		return "", err
 	}
-	fmt.Println("Upload complete.")
+	logrus.Infoln("Upload complete.")
 	return publicLink, nil
 }
